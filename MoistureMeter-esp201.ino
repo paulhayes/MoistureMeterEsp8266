@@ -1,13 +1,20 @@
-//#include <Adafruit_NeoPixel.h>
 #include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiServer.h>
+#include <WiFiUdp.h>
+
+#include <ESP8266WiFi.h>
+
 #include <Phant.h>
 #include <stdio.h>
-#include "colours.h"
+#include "mathFuncs.h"
+#include <EEPROM.h>
 
 /*
  * {"title":"Soil Moisture Sensor","outputUrl":"http://data.sparkfun.com/output/q5X6GMEqJZUwE6KZjXK3","inputUrl":"http://data.sparkfun.com/input/q5X6GMEqJZUwE6KZjXK3","manageUrl":"http://data.sparkfun.com/streams/q5X6GMEqJZUwE6KZjXK3","publicKey":"q5X6GMEqJZUwE6KZjXK3","privateKey":"BVA2qdkYB1I9vNZRGMZn","deleteKey":"Rv2LgjAqyEs3KGe1NjeY"}
  */
 
+//const char* host = "192.168.0.103";
 //const char* ssid     = "dlink-7AE0";
 //const char* password = "eeews24530";
 
@@ -20,99 +27,137 @@ const char* privateKey = "BVA2qdkYB1I9vNZRGMZn";
 
 float MoistureMax = 0.2;
 float MoistureMin = 1.0;
+float reportThreshold = 0.05;
 
 float lastSentMoisture;
 
-unsigned long lastSendMoistureTime;
+int sleepTimeS = 60;
 
 #define ledPin 5
-#define neoPixPin 5
-#define pixelsNum 24
-
-//Adafruit_NeoPixel ring = Adafruit_NeoPixel(pixelsNum, neoPixPin, NEO_GRB + NEO_KHZ800);
-
-char buffer[25];
+#define indicatorPin 4
+#define sensorPowerPin 0
 
 Phant phant(host, streamId, privateKey);
 
 void setup() {
+
   // put your setup code here, to run once:
   pinMode(ledPin,OUTPUT);
+  pinMode(indicatorPin,OUTPUT);
+  pinMode(sensorPowerPin,OUTPUT);
 
-  Serial.begin(9600);
   digitalWrite(ledPin, LOW);
+  digitalWrite(indicatorPin, LOW);
+  digitalWrite(sensorPowerPin, HIGH);
 
-  //while(!Serial);
-  
-  digitalWrite(ledPin, LOW);
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  EEPROM.begin(32);
+  EEPROM_readFloat(0, lastSentMoisture);
+  if( isnan( lastSentMoisture ) ){
+    lastSentMoisture = 0.0;
   }
-
-  Serial.println(WiFi.localIP());
-
-  digitalWrite(ledPin, HIGH);
-  //ring.begin();
-  //ring.setBrightness(64);
-  meter(0.0);
   
 }
 
 void loop() {
-  float moisture = iLerp( MoistureMin, MoistureMax, 1.0 * analogRead(A0) / 1024.0 );
-  float diff = abs( moisture - lastSentMoisture );
+  digitalWrite(ledPin, HIGH );
+  digitalWrite(sensorPowerPin, LOW);
 
-  meter( moisture );
-
-  Serial.print("Moisture=");
-  Serial.print(analogRead(A0));
-  Serial.print(" Moisture=");
-  Serial.println( dtostrf( moisture, 4, 2, buffer) );
+  delay(10);
+  long avg = 0;
+  const int numSamples = 200;
+  for(int sample=0;sample<numSamples;sample++){
+    avg += analogRead(A0);
+    delay(10);
+  }
+  avg /= numSamples;
+  float* samples;
     
-  unsigned long elapsed = millis() - lastSendMoistureTime;
-  if( diff > 0.01 && elapsed > 30000 ){
+  digitalWrite(sensorPowerPin, HIGH);
+
+  float moisture = iLerp( MoistureMin, MoistureMax, 1.0 * avg / 1024.0 );
+  float diff = abs( moisture - lastSentMoisture );
+    
+  if( diff > reportThreshold ){
+
+    // CONNECT
+  
+    digitalWrite(ledPin, LOW);
+    digitalWrite(indicatorPin, LOW);
+    meter( moisture );
+  
+    int flashingCounter = 0;
+    int ledOn = 0;
+    
+    WiFi.begin(ssid, password);
+  
+    while (WiFi.status() != WL_CONNECTED ) {
+      delay(100);
+      if( ++flashingCounter > 2 ){
+        digitalWrite(ledPin, ledOn=!ledOn );
+        flashingCounter = 0;
+      }
+    }
+  
+    //END CONNECT
+    
     digitalWrite(ledPin, HIGH);
+
     WiFiClient client;
     const int httpPort = 80;
     if (!client.connect(host, httpPort)) {
       digitalWrite(ledPin, LOW);
       return;
     }
-    Serial.println("sent moisture");
     phant.add("moisture", moisture );
+    phant.add("diff", diff );
   
     client.print(phant.post());
+    
+    client.print(String());
   
     while(client.available()){
       String line = client.readStringUntil('\r');
-      Serial.print(line);
     }
 
     lastSentMoisture = moisture;
-    lastSendMoistureTime = millis();
-    delay(500);
-  }
-  
-  delay(500);
+    digitalWrite(indicatorPin, LOW);
+    EEPROM_writeFloat(0, moisture);
+    EEPROM.commit();  
 
+    //WiFi.disconnect();
+    
+  }
+  else {
+    meter( moisture );
+    delay(1000);
+  }
+
+  digitalWrite(ledPin, LOW);
+  digitalWrite(indicatorPin, LOW);
+  ESP.deepSleep(sleepTimeS * 1000000);
+  //delay(sleepTimeS*1000);
 }
 
 void meter(float measure){
-  /*
-  measure = 1 - measure;
-  for(int i=0;i<pixelsNum;i++){
-    uint32_t c = 0;
-    float p = 1.0 * i / pixelsNum ;
-    if( p <= measure ){
-      c = getColor(p);
-    }
-    ring.setPixelColor(i,c);
-  }
-  ring.show(); 
-  */
+    analogWrite(indicatorPin,floor( 196 * clamp(0,1,1-measure)) );
 }
 
+int EEPROM_writeFloat(int ee, const float& value)
+{
+   const byte* p = (const byte*)(const void*)&value;
+   int i;
+   const byte valueSize = sizeof(value);
+   for (i = 0; i < valueSize; i++)
+       EEPROM.write(ee++, *p++);
+   return i;
+}
 
+int EEPROM_readFloat(int ee, float& value)
+{
+   byte* p = (byte*)(void*)&value;
+   int i;
+   const byte valueSize = sizeof(value);
+   for (i = 0; i < valueSize; i++)
+       *p++ = EEPROM.read(ee++);
+   return i;
+}
