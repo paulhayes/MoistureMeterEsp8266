@@ -7,23 +7,14 @@
 
 #include <Phant.h>
 #include <stdio.h>
-#include "mathFuncs.h"
+#include "maths.h"
 #include <EEPROM.h>
 
 /*
  * {"title":"Soil Moisture Sensor","outputUrl":"http://data.sparkfun.com/output/q5X6GMEqJZUwE6KZjXK3","inputUrl":"http://data.sparkfun.com/input/q5X6GMEqJZUwE6KZjXK3","manageUrl":"http://data.sparkfun.com/streams/q5X6GMEqJZUwE6KZjXK3","publicKey":"q5X6GMEqJZUwE6KZjXK3","privateKey":"BVA2qdkYB1I9vNZRGMZn","deleteKey":"Rv2LgjAqyEs3KGe1NjeY"}
  */
 
-//const char* host = "192.168.0.103";
-//const char* ssid     = "dlink-7AE0";
-//const char* password = "eeews24530";
-
-const char* ssid     = "dlink-7AE0";
-const char* password = "eeews24530";
-
-const char* host = "data.sparkfun.com";
-const char* streamId   = "q5X6GMEqJZUwE6KZjXK3";
-const char* privateKey = "BVA2qdkYB1I9vNZRGMZn";
+#include "settings.h"
 
 float MoistureMax = 0.2;
 float MoistureMin = 1.0;
