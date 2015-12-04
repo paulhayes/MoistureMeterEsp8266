@@ -10,6 +10,8 @@
 #include "maths.h"
 #include <EEPROM.h>
 
+#include <RunningMedian.h>
+
 /*
  * {"title":"Soil Moisture Sensor","outputUrl":"http://data.sparkfun.com/output/q5X6GMEqJZUwE6KZjXK3","inputUrl":"http://data.sparkfun.com/input/q5X6GMEqJZUwE6KZjXK3","manageUrl":"http://data.sparkfun.com/streams/q5X6GMEqJZUwE6KZjXK3","publicKey":"q5X6GMEqJZUwE6KZjXK3","privateKey":"BVA2qdkYB1I9vNZRGMZn","deleteKey":"Rv2LgjAqyEs3KGe1NjeY"}
  */
@@ -18,11 +20,14 @@
 
 float MoistureMax = 0.2;
 float MoistureMin = 1.0;
-float reportThreshold = 0.05;
+float reportThreshold = 0.0;
 
 float lastSentMoisture;
 
-int sleepTimeS = 60;
+const int sleepTimeS = 60;
+const int numSamples = 20;
+const int sampleDelay = 100;
+RunningMedian runningMedian = RunningMedian(numSamples);
 
 #define ledPin 5
 #define indicatorPin 4
@@ -54,18 +59,17 @@ void loop() {
   digitalWrite(sensorPowerPin, LOW);
 
   delay(10);
-  long avg = 0;
-  const int numSamples = 200;
-  for(int sample=0;sample<numSamples;sample++){
-    avg += analogRead(A0);
-    delay(10);
+  runningMedian.clear();
+  for(int sampleIndex=0;sampleIndex<numSamples;sampleIndex++){
+    int sample = analogRead(A0);
+    runningMedian.add( sample );
+    delay(sampleDelay);
   }
-  avg /= numSamples;
   float* samples;
     
   digitalWrite(sensorPowerPin, HIGH);
 
-  float moisture = iLerp( MoistureMin, MoistureMax, 1.0 * avg / 1024.0 );
+  float moisture = iLerp( MoistureMin, MoistureMax, 1.0 * runningMedian.getMedian() / 1024.0 );
   float diff = abs( moisture - lastSentMoisture );
     
   if( diff > reportThreshold ){
@@ -130,7 +134,7 @@ void loop() {
 }
 
 void meter(float measure){
-    analogWrite(indicatorPin,floor( 196 * clamp(0,1,1-measure)) );
+    //analogWrite(indicatorPin,floor( 196 * clamp(0,1,1-measure)) );
 }
 
 int EEPROM_writeFloat(int ee, const float& value)
